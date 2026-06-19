@@ -1,0 +1,70 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  sast-scan:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: node scripts/security-scan.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: security-report, path: security-report.json, retention-days: 30 }
+
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: npm audit --audit-level=high
+
+  typecheck:
+    name: TypeScript Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  auto-fix-deps:
+    name: Auto-fix Dependencies
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { token: '${{ secrets.GITHUB_TOKEN }}' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - id: fix
+        run: |
+          npm audit fix --prefer-dedupe 2>&1 | tee audit-fix.log
+          git diff --quiet package.json package-lock.json && echo "changed=false" >> $GITHUB_OUTPUT || echo "changed=true" >> $GITHUB_OUTPUT
+      - if: steps.fix.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: '${{ secrets.GITHUB_TOKEN }}'
+          commit-message: 'fix(security): auto-fix npm audit vulnerabilities'
+          branch: security/auto-fix-deps
+          title: '🔒 Security: Auto-fix npm audit vulnerabilities'
+          labels: security,automated,dependencies
