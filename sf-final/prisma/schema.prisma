@@ -1,0 +1,324 @@
+// prisma/schema.prisma
+// Database: PostgreSQL (Supabase / PlanetScale / Railway all work)
+// Run: npx prisma db push && npx prisma generate
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── NextAuth required tables ─────────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Core User model ──────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?   // for credential login
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  accounts      Account[]
+  sessions      Session[]
+  profile       UserProfile?
+  reviews       Review[]
+  subscription  Subscription?
+  affiliateCode AffiliateCode?
+  referrals     Referral[]    @relation("ReferredBy")
+  referredUsers Referral[]    @relation("ReferredUser")
+  watchlist     WatchlistItem[]
+  moderationLogs ModerationLog[]
+
+  // Role
+  role          Role      @default(USER)
+
+  @@index([email])
+}
+
+enum Role {
+  USER
+  CRITIC        // Trusted reviewer — earns affiliate commission
+  CREATOR       // Filmmaker — can have professional profile
+  MODERATOR     // Community moderator
+  ADMIN
+}
+
+// ─── Extended Profile ─────────────────────────────────────────────────────────
+
+model UserProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Display
+  displayName     String?
+  bio             String?  @db.Text
+  avatarUrl       String?
+  website         String?
+  country         String?  @default("US")
+  preferredCurrency String? @default("USD") // "INR" or "USD"
+
+  // Critic-specific
+  criticBadge     String?  // e.g. "Horror Specialist", "Indie Film Critic"
+  totalReviews    Int      @default(0)
+  helpfulVotes    Int      @default(0)
+  isFeaturedCritic Boolean @default(false)
+
+  // Creator/filmmaker-specific  
+  agentEmail      String?  // shown with PRO subscription
+  agentPhone      String?
+  availableForWork Boolean @default(false)
+  imdbLink        String?
+  reelUrl         String?  // showreel link
+
+  // Social
+  twitterHandle   String?
+  instagramHandle String?
+  youtubeChannel  String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ─── Subscriptions (IMDbPro-style) ───────────────────────────────────────────
+
+model Subscription {
+  id                String             @id @default(cuid())
+  userId            String             @unique
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  plan              SubscriptionPlan
+  status            SubscriptionStatus @default(ACTIVE)
+  currency          String             @default("USD") // "USD" or "INR"
+  amount            Int                // in smallest unit (cents / paise)
+
+  // Payment gateway IDs
+  stripeSubscriptionId   String?        @unique
+  stripeCustomerId       String?
+  razorpaySubscriptionId String?        @unique
+  razorpayCustomerId     String?
+
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd  Boolean  @default(false)
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+enum SubscriptionPlan {
+  CRITIC_PRO      // Enhanced critic profile + affiliate dashboard — ₹199/mo or $3/mo
+  CREATOR_PRO     // Agent contact + "Available for Work" — ₹499/mo or $6/mo
+  STUDIO          // Sponsored spotlight + analytics — ₹2999/mo or $35/mo
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  TRIALING
+}
+
+// ─── Affiliate System ────────────────────────────────────────────────────────
+
+model AffiliateCode {
+  id          String     @id @default(cuid())
+  userId      String     @unique
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code        String     @unique  // e.g. "john-critic-sf"
+  commission  Float      @default(0.10) // 10%
+  clicks      Int        @default(0)
+  conversions Int        @default(0)
+  totalEarned Float      @default(0)
+  referrals   Referral[]
+  createdAt   DateTime   @default(now())
+}
+
+model Referral {
+  id              String   @id @default(cuid())
+  affiliateCodeId String
+  affiliateCode   AffiliateCode @relation(fields: [affiliateCodeId], references: [id])
+  referrerId      String
+  referrer        User     @relation("ReferredBy", fields: [referrerId], references: [id])
+  referredUserId  String
+  referredUser    User     @relation("ReferredUser", fields: [referredUserId], references: [id])
+  commissionPaid  Float    @default(0)
+  paidOut         Boolean  @default(false)
+  createdAt       DateTime @default(now())
+}
+
+// ─── Reviews ─────────────────────────────────────────────────────────────────
+
+model Review {
+  id           String        @id @default(cuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tmdbMovieId  Int
+  movieTitle   String
+  rating       Float         // 1-10
+  content      String        @db.Text
+  containsSpoilers Boolean   @default(false)
+  status       ReviewStatus  @default(PENDING)
+  helpfulVotes Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  moderationLogs ModerationLog[]
+
+  @@index([tmdbMovieId])
+  @@index([userId])
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  FLAGGED
+}
+
+// ─── Watchlist ────────────────────────────────────────────────────────────────
+
+model WatchlistItem {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tmdbMovieId Int
+  movieTitle  String
+  posterPath  String?
+  addedAt     DateTime @default(now())
+
+  @@unique([userId, tmdbMovieId])
+  @@index([userId])
+}
+
+// ─── Sponsored Spotlights ────────────────────────────────────────────────────
+
+model Spotlight {
+  id            String          @id @default(cuid())
+  title         String
+  description   String?         @db.Text
+  imageUrl      String?
+  trailerUrl    String?
+  ctaLabel      String          @default("Watch Now")
+  ctaUrl        String
+  sponsorName   String
+  sponsorLogoUrl String?
+
+  placement     SpotlightPlacement
+  genreId       Int?            // null = homepage, set = specific genre page
+  tmdbMovieId   Int?            // if promoting a specific movie
+
+  // Scheduling
+  startsAt      DateTime
+  endsAt        DateTime
+  isActive      Boolean         @default(true)
+
+  // Analytics
+  impressions   Int             @default(0)
+  clicks        Int             @default(0)
+
+  // Billing
+  currency      String          @default("USD")
+  totalPaid     Int             @default(0)
+
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([placement, isActive])
+}
+
+enum SpotlightPlacement {
+  HOMEPAGE_HERO       // Top of homepage
+  HOMEPAGE_ROW        // Between movie rows
+  GENRE_TOP           // Top of genre page
+  MOVIE_PAGE_SIDEBAR  // Movie page sidebar
+}
+
+// ─── Moderation ───────────────────────────────────────────────────────────────
+
+model ModerationLog {
+  id         String   @id @default(cuid())
+  moderatorId String
+  moderator   User    @relation(fields: [moderatorId], references: [id])
+  reviewId    String?
+  review      Review? @relation(fields: [reviewId], references: [id])
+  action      String  // "approve", "reject", "flag"
+  reason      String?
+  createdAt   DateTime @default(now())
+}
+
+// ─── Security Logging ─────────────────────────────────────────────────────────
+
+model SecurityLog {
+  id        String   @id @default(cuid())
+  type      String   // LOGIN_FAILED, RATE_LIMIT, BOT_DETECTED, etc.
+  ip        String   @db.Inet
+  userId    String?
+  email     String?
+  endpoint  String
+  userAgent String?  @db.Text
+  details   Json?    // Additional context (confidence, reason, etc.)
+  severity  String   // low, medium, high, critical
+  createdAt DateTime @default(now())
+
+  @@index([ip])
+  @@index([userId])
+  @@index([type])
+  @@index([severity])
+  @@index([createdAt])
+}
+
+// ─── IP Blocklist (persistent auto-blocking) ─────────────────────────────────
+model IpBlock {
+  id           String    @id @default(cuid())
+  ip           String    @unique
+  reason       String?
+  autoBlocked  Boolean   @default(false)
+  blockedUntil DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([ip])
+  @@index([blockedUntil])
+}

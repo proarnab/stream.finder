@@ -1,0 +1,48 @@
+{
+  "name": "streamfinder",
+  "version": "3.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate",
+    "db:studio": "prisma studio",
+    "security:scan": "node scripts/security-scan.mjs",
+    "security:fix": "node scripts/security-scan.mjs --fix",
+    "security:watch": "node scripts/security-scan.mjs --watch"
+  },
+  "dependencies": {
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "next-auth": "^4.24.7",
+    "@prisma/client": "^5.14.0",
+    "@auth/prisma-adapter": "^2.2.0",
+    "bcryptjs": "^2.4.3",
+    "stripe": "^15.7.0",
+    "razorpay": "^2.9.2",
+    "zod": "^3.23.8",
+    "next-pwa": "^5.6.0",
+    "workbox-window": "^7.1.0",
+    "jose": "^5.6.3",
+    "@upstash/ratelimit": "^2.0.1",
+    "@upstash/redis": "^1.34.0",
+    "hcaptcha": "^1.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@types/bcryptjs": "^2.4.6",
+    "autoprefixer": "^10.4.19",
+    "eslint": "^8",
+    "eslint-config-next": "^14.2.0",
+    "postcss": "^8.4.38",
+    "prisma": "^5.14.0",
+    "tailwindcss": "^3.4.3",
+    "typescript": "^5"
+  }
+}
